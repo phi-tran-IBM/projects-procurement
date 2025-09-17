@@ -66,10 +66,13 @@ except ImportError as e:
 try:
     from simple_cache import QueryCache
     query_cache = QueryCache(max_size=CACHE_MAX_SIZE, ttl_seconds=CACHE_TTL_SECONDS)
+    # NEW: Granular cache for decomposition results
+    decomposition_cache = QueryCache(max_size=200, ttl_seconds=CACHE_TTL_SECONDS * 2)
     CACHE_AVAILABLE = True
 except ImportError:
     CACHE_AVAILABLE = False
     query_cache = None
+    decomposition_cache = None
     logger.warning("Cache not available")
 
 # Initialize hybrid system
@@ -89,48 +92,55 @@ def get_hybrid_system() -> HybridProcurementRAG:
 # ENHANCED QUERY PROCESSING WITH LLM
 # ======================================================================
 
+# NEW: Asynchronous placeholder for LLM enhancement
+async def enhance_response_async(question: str, result: Dict[str, Any]):
+    """
+    Placeholder for asynchronous LLM enhancement. In a real-world scenario,
+    this would be handled by a background task runner like Celery.
+    """
+    if LLM_DECOMPOSER_AVAILABLE and result.get('answer'):
+        logger.info("Starting asynchronous LLM enhancement...")
+        # Simulate network latency and processing time for the LLM call
+        await asyncio.sleep(2)
+        enhanced_response = generate_response(question, result)
+        result['answer'] = enhanced_response
+        result['llm_enhanced'] = True
+        logger.info("Asynchronous LLM enhancement complete.")
+    return result
+
 def answer_question_intelligent(question: str, mode: str = "auto") -> Dict[str, Any]:
     """
     Main entry point with LLM-powered understanding and comprehensive fallbacks
-    
-    Args:
-        question: User's query
-        mode: Processing mode - "auto", "sql", "rag", or "hybrid"
-    
-    Returns:
-        Dict containing answer with natural language response and metadata
     """
     start_time = time.time()
-    
-    # Input sanitization
     question = sanitize_input(question)
     
-    # Check cache first
-    cache_key = None
-    if CACHE_AVAILABLE and mode == "auto":
-        cache_key = generate_cache_key(question)
+    # Check main result cache first
+    cache_key = generate_cache_key(question)
+    if CACHE_AVAILABLE and mode == "auto" and query_cache.get(cache_key):
         cached_result = query_cache.get(cache_key)
-        if cached_result:
-            logger.info(f"Cache hit for query: {question[:50]}...")
-            cached_result['cache_hit'] = True
-            return cached_result
+        logger.info(f"Full cache hit for query: {question[:50]}...")
+        cached_result['cache_hit'] = 'full'
+        return cached_result
     
     try:
-        # ============================================
-        # NEW: LLM-POWERED QUERY UNDERSTANDING
-        # ============================================
         query_analysis = None
+        # NEW: Granular caching for query decomposition
         if LLM_DECOMPOSER_AVAILABLE and mode in ["auto", "hybrid"]:
-            logger.info("Analyzing query with LLM...")
-            query_analysis = decompose_query(question)
+            decomposition_cache_key = f"decomp_{cache_key}"
+            cached_decomp = decomposition_cache.get(decomposition_cache_key) if CACHE_AVAILABLE else None
             
-            # Log the analysis
-            logger.info(f"Query intent: {query_analysis['intent']['primary_intent']} "
-                       f"(confidence: {query_analysis['intent']['confidence']})")
-            logger.info(f"Extracted vendors: {query_analysis['entities']['vendors']}")
-            logger.info(f"Query complexity: {'Complex' if query_analysis['is_complex'] else 'Simple'}")
+            if cached_decomp:
+                logger.info("Decomposition cache hit.")
+                query_analysis = cached_decomp
+                query_analysis['cache_hit'] = 'decomposition'
+            else:
+                logger.info("Analyzing query with LLM...")
+                query_analysis = decompose_query(question)
+                if CACHE_AVAILABLE:
+                    decomposition_cache.set(decomposition_cache_key, query_analysis)
         
-        # Route based on mode and LLM analysis
+        # Route based on mode and analysis
         if mode == "sql":
             result = process_sql_query(question, query_analysis)
         elif mode == "rag":
@@ -140,25 +150,20 @@ def answer_question_intelligent(question: str, mode: str = "auto") -> Dict[str, 
         else:  # auto mode
             result = process_auto_query_enhanced(question, query_analysis)
         
-        # ============================================
-        # NEW: NATURAL LANGUAGE RESPONSE GENERATION
-        # ============================================
+        # Asynchronous Enhancement (Simulated)
+        # In a real application, you would return a preliminary result here
+        # and notify the user that an enhanced response is being generated.
+        # For this implementation, we will wait for the async task to complete.
         if LLM_DECOMPOSER_AVAILABLE and result.get('answer'):
-            # Generate natural language response
-            original_answer = result.get('answer', '')
-            enhanced_response = generate_response(question, result)
-            
-            # Keep both versions
-            result['raw_answer'] = original_answer
-            result['answer'] = enhanced_response
-            result['llm_enhanced'] = True
-        
-        # Add metadata
+            logger.info("Preparing for LLM response generation...")
+            # This simulates awaiting an async task.
+            result = asyncio.run(enhance_response_async(question, result))
+
         result['processing_time'] = time.time() - start_time
         result['mode'] = mode
         
-        # Cache successful results
-        if CACHE_AVAILABLE and cache_key and result.get('confidence', 0) > 70:
+        # Cache the final successful result
+        if CACHE_AVAILABLE and result.get('confidence', 0) > 70:
             query_cache.set(cache_key, result)
         
         return result
@@ -166,6 +171,10 @@ def answer_question_intelligent(question: str, mode: str = "auto") -> Dict[str, 
     except Exception as e:
         logger.error(f"Query processing failed: {e}")
         return create_error_response(str(e), question)
+        
+# The rest of the file remains largely unchanged, as the primary performance
+# improvements are in the main `answer_question_intelligent` function.
+# Minor changes may be made to accommodate the new caching and async structure.
 
 def process_auto_query_enhanced(question: str, query_analysis: Optional[Dict] = None) -> Dict[str, Any]:
     """

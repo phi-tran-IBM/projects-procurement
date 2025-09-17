@@ -85,8 +85,13 @@ class LLMQueryDecomposer:
     def __init__(self):
         """Initialize the decomposer with specialized LLMs"""
         try:
-            # --- MODIFIED: Initialize two separate LLM clients ---
-            # Fast model for analysis, classification, and decomposition
+            # --- NEW: Added comments for clarity on model selection ---
+            # This class is designed to use two different LLMs for optimal performance.
+            # The model IDs are configured in `constants.py`.
+            
+            # For decomposition, a smaller, faster model is recommended.
+            # This model is used for tasks like intent classification and entity extraction.
+            # You can set the `DECOMPOSER_MODEL` variable in `constants.py` to a lighter model.
             self.decomposer_llm = ChatWatsonx(
                 model_id=DECOMPOSER_MODEL,
                 url=WATSONX_URL,
@@ -95,7 +100,9 @@ class LLMQueryDecomposer:
                 params={"decoding_method": "greedy", "max_new_tokens": 1024, "temperature": 0.1}
             )
             
-            # Powerful model for generating high-quality user-facing responses
+            # For synthesis, a more powerful model is used to generate high-quality,
+            # user-facing responses. This is configured via the `SYNTHESIS_MODEL`
+            # variable in `constants.py`.
             self.synthesis_llm = ChatWatsonx(
                 model_id=SYNTHESIS_MODEL,
                 url=WATSONX_URL,

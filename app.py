@@ -222,10 +222,99 @@ def insights():
     return jsonify(insights_data)
 
 # ============================================
+# NEWLY IMPLEMENTED ENDPOINTS
+# ============================================
+
+@app.route('/statistics/<metric>', methods=['POST'])
+def statistics(metric):
+    # This endpoint now handles statistical calculations.
+    # The logic is adapted from the original `hybrid_rag_logic.py`
+    # to provide a dedicated endpoint for this functionality.
+    
+    # Extract the data for the calculation
+    query = f"SELECT CAST({COST_COL} AS FLOAT) as value FROM procurement WHERE {COST_COL} IS NOT NULL"
+    df = safe_execute_query(query)
+    
+    if df.empty:
+        return jsonify({"error": "No data available for statistical analysis"}), 404
+    
+    values = df['value'].dropna().values
+    
+    # Calculate the requested metric
+    result = calculate_statistical_metrics(values, metric)
+    
+    if "error" in result:
+        return jsonify(result), 400
+        
+    # Enhance the response with interpretation from the LLM
+    result['interpretation'] = interpret_statistics(result, metric)
+    result['visualization_suggestion'] = suggest_visualization(result, metric)
+    
+    return jsonify(result)
+
+@app.route('/vendor/<vendor_name>', methods=['GET'])
+def vendor_details(vendor_name):
+    # This new route provides detailed information for a specific vendor.
+    # It uses the comprehensive data retrieval function from `app_helpers.py`.
+    data = analyze_vendor_comprehensive(vendor_name)
+    if "error" in data:
+        return jsonify(data), 404
+    return jsonify(data)
+
+@app.route('/compare-advanced', methods=['POST'])
+def compare_advanced():
+    # This endpoint handles advanced vendor comparisons.
+    # It takes a list of vendors and metrics to compare.
+    data = request.json
+    if not data or 'entities' not in data or 'type' not in data:
+        return jsonify({"error": "Missing 'entities' or 'type' in request body"}), 400
+    
+    entities = data['entities']
+    comparison_type = data['type']
+    
+    if comparison_type == 'vendors':
+        result = compare_vendors_sql(entities, data.get('metrics', ['total_spending', 'order_count']))
+        result['visualization'] = generate_comparison_visualization(result)
+    else:
+        return jsonify({"error": f"Comparison type '{comparison_type}' not supported"}), 400
+        
+    return jsonify(result)
+
+@app.route('/dashboard', methods=['GET'])
+def dashboard():
+    # This new endpoint provides a summary of dashboard data.
+    # It consolidates key metrics and insights into a single response.
+    summary = get_dashboard_summary()
+    if not summary:
+        return jsonify({"error": "Unable to retrieve dashboard summary"}), 500
+        
+    dashboard_data = {
+        "summary": summary,
+        "trends": get_trend_data(),
+        "alerts": generate_alerts(),
+        "recommendations": generate_dashboard_recommendations()
+    }
+    
+    return jsonify(dashboard_data)
+
+@app.route('/recommend', methods=['POST'])
+def recommend():
+    # This endpoint generates strategic recommendations based on a given context.
+    data = request.json
+    if not data or 'context' not in data:
+        return jsonify({"error": "Missing 'context' in request body"}), 400
+    
+    context = data['context']
+    
+    # Use the intelligent agent to generate recommendations
+    # This leverages the full power of the RAG pipeline for strategic insights
+    recommendations = get_recommendations(context)
+    
+    return jsonify(recommendations)
+
+# ============================================
 # OTHER ENDPOINTS (UNCHANGED)
 # ============================================
-# The remaining endpoints from your original file are preserved here.
-# For brevity, only a few are shown, but the generated file contains all of them.
 
 @app.route('/chat', methods=['POST'])
 def chat():

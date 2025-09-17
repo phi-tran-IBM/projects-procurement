@@ -151,9 +151,10 @@ class EnhancedRAGProcessor:
                 "source": "RAG"
             }
 
-    def _enhanced_semantic_search(self, question: str, entities: Optional[Dict] = None) -> List[Dict]:
+    def _enhanced_semantic_search(self, question: str, entities: Optional[Dict] = None, n_results: int = 15) -> List[Dict]:
         """
-        Perform enhanced semantic search with entity awareness
+        Perform enhanced semantic search with entity awareness.
+        The n_results parameter is now configurable.
         """
         # Check cache
         cache_key = hashlib.md5(question.encode()).hexdigest()
@@ -174,17 +175,17 @@ class EnhancedRAGProcessor:
                 if entities.get('metrics'):
                     enhanced_query += f" metrics: {' '.join(entities['metrics'][:3])}"
             
-            # Perform vector search
+            # Perform vector search with the optimized n_results
             results = collection.query(
                 query_texts=[enhanced_query],
-                n_results=50  # Get more results for better context
+                n_results=n_results  # Use the configurable parameter
             )
             
             if not results['metadatas'][0]:
                 # Try simplified query if enhanced query returns nothing
                 results = collection.query(
                     query_texts=[question],
-                    n_results=30
+                    n_results=n_results
                 )
             
             # Process and rank results
