@@ -13,7 +13,6 @@ import numpy as np
 import re
 import json
 import logging
-import xml.etree.ElementTree as ET
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 import hashlib
@@ -25,8 +24,6 @@ from langchain.memory import ConversationSummaryMemory
 
 # Import discovery store for vector search
 from discovery_store import collection
-
-from template_utils import extract_template_content
 
 # Import from updated constants (using centralized configuration)
 from constants import (
@@ -77,6 +74,152 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# ============================================
+# TEMPLATE RESPONSE EXTRACTION UTILITIES
+# ============================================
+
+def extract_template_content(response_text: str) -> str:
+    """
+    Extract readable content from template-formatted LLM responses.
+    Handles various template formats used in the grounded prompts.
+    """
+    if not response_text or not isinstance(response_text, str):
+        return response_text
+
+    # Check if template parsing is enabled
+    if not FEATURES.get('template_parsing', False):
+        return response_text
+
+    # Try to extract based on template markers
+
+    # For synthesis responses
+    if '<ANSWER>' in response_text:
+        match = re.search(r'<ANSWER>(.*?)</ANSWER>', response_text, re.IGNORECASE | re.DOTALL)
+        if match:
+            return match.group(1).strip()
+
+    # For recommendation responses
+    if '<RECOMMENDATIONS_START>' in response_text or '<REC1>' in response_text:
+        return extract_recommendations_from_template(response_text)
+
+    # For comparison responses
+    if '<COMPARISON_START>' in response_text or '<VENDOR1>' in response_text:
+        return extract_comparison_from_template(response_text)
+
+    # For statistical responses
+    if '<STATISTICAL_ANALYSIS>' in response_text or '<FINDING1>' in response_text:
+        return extract_statistics_from_template(response_text)
+
+    # For insufficient data responses
+    if '<INSUFFICIENT_DATA>' in response_text:
+        match = re.search(r'<INSUFFICIENT_DATA>(.*?)</INSUFFICIENT_DATA>',
+                         response_text, re.IGNORECASE | re.DOTALL)
+        if match:
+            return match.group(1).strip()
+
+    # Fallback: remove all template tags
+    cleaned = re.sub(r'<[^>]+>', '', response_text)
+    return cleaned.strip()
+
+def extract_recommendations_from_template(response_text: str) -> str:
+    """Extract recommendations from template format"""
+    recommendations = []
+
+    # Check for insufficient data
+    insufficient_match = re.search(r'<INSUFFICIENT_DATA>(.*?)</INSUFFICIENT_DATA>',
+                                 response_text, re.IGNORECASE | re.DOTALL)
+    if insufficient_match:
+        return insufficient_match.group(1).strip()
+
+    # Extract numbered recommendations
+    for i in range(1, 11):
+        rec_pattern = f'<REC{i}>\\s*<ACTION>(.*?)</ACTION>\\s*<JUSTIFICATION>(.*?)</JUSTIFICATION>\\s*(?:<PRIORITY>(.*?)</PRIORITY>)?\\s*</REC{i}>'
+        match = re.search(rec_pattern, response_text, re.IGNORECASE | re.DOTALL)
+        if match:
+            action = match.group(1).strip()
+            justification = match.group(2).strip()
+            priority = match.group(3).strip() if match.group(3) else "Medium"
+            recommendations.append(f"**{i}. {action}** (Priority: {priority})\n   - {justification}")
+
+    if recommendations:
+        return "### Strategic Recommendations\n\n" + "\n\n".join(recommendations)
+
+    # Fallback
+    return re.sub(r'<[^>]+>', '', response_text).strip()
+
+def extract_comparison_from_template(response_text: str) -> str:
+    """Extract comparison from template format"""
+    result = []
+
+    # Extract summary
+    summary_match = re.search(r'<SUMMARY>(.*?)</SUMMARY>', response_text, re.IGNORECASE | re.DOTALL)
+    if summary_match:
+        result.append(f"**Summary:** {summary_match.group(1).strip()}\n")
+
+    # Extract vendor details
+    for i in range(1, 11):
+        vendor_pattern = f'<VENDOR{i}>\\s*<NAME>(.*?)</NAME>\\s*<PERFORMANCE>(.*?)</PERFORMANCE>\\s*(?:<STRENGTHS>(.*?)</STRENGTHS>)?\\s*(?:<CONCERNS>(.*?)</CONCERNS>)?\\s*</VENDOR{i}>'
+        match = re.search(vendor_pattern, response_text, re.IGNORECASE | re.DOTALL)
+        if match:
+            name = match.group(1).strip()
+            performance = match.group(2).strip()
+            strengths = match.group(3).strip() if match.group(3) else ""
+            concerns = match.group(4).strip() if match.group(4) else ""
+
+            result.append(f"### {name}")
+            result.append(f"- **Performance:** {performance}")
+            if strengths:
+                result.append(f"- **Strengths:** {strengths}")
+            if concerns:
+                result.append(f"- **Concerns:** {concerns}")
+            result.append("")
+
+    # Extract recommendation
+    rec_match = re.search(r'<RECOMMENDATION>(.*?)</RECOMMENDATION>', response_text, re.IGNORECASE | re.DOTALL)
+    if rec_match:
+        result.append(f"**Recommendation:** {rec_match.group(1).strip()}")
+
+    if result:
+        return "\n".join(result)
+
+    return re.sub(r'<[^>]+>', '', response_text).strip()
+
+def extract_statistics_from_template(response_text: str) -> str:
+    """Extract statistical analysis from template format"""
+    result = []
+
+    # Extract summary
+    summary_match = re.search(r'<SUMMARY>(.*?)</SUMMARY>', response_text, re.IGNORECASE | re.DOTALL)
+    if summary_match:
+        result.append(f"**Summary:** {summary_match.group(1).strip()}\n")
+
+    # Extract findings
+    findings = []
+    for i in range(1, 11):
+        finding_pattern = f'<FINDING{i}>(.*?)</FINDING{i}>'
+        match = re.search(finding_pattern, response_text, re.IGNORECASE | re.DOTALL)
+        if match:
+            findings.append(f"- {match.group(1).strip()}")
+
+    if findings:
+        result.append("**Key Findings:**")
+        result.extend(findings)
+        result.append("")
+
+    # Extract business impact
+    impact_match = re.search(r'<BUSINESS_IMPACT>(.*?)</BUSINESS_IMPACT>', response_text, re.IGNORECASE | re.DOTALL)
+    if impact_match:
+        result.append(f"**Business Impact:** {impact_match.group(1).strip()}\n")
+
+    # Extract recommendations
+    rec_match = re.search(r'<RECOMMENDATIONS>(.*?)</RECOMMENDATIONS>', response_text, re.IGNORECASE | re.DOTALL)
+    if rec_match:
+        result.append(f"**Recommendations:** {rec_match.group(1).strip()}")
+
+    if result:
+        return "\n".join(result)
+
+    return re.sub(r'<[^>]+>', '', response_text).strip()
 
 # ============================================
 # ENHANCED RAG PROCESSOR

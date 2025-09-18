@@ -96,7 +96,7 @@ LLM_TOP_P = float(os.getenv("LLM_TOP_P", "0.95"))
 # ============================================
 
 # Unified Analysis Prompt - Single call instead of 3-4
-UNIFIED_ANALYSIS_PROMPT = """You are an expert procurement query analyzer. Your task is to analyze a user's query and provide a structured XML output. Think step-by-step to deconstruct the query before you respond.
+UNIFIED_ANALYSIS_PROMPT = """You are an expert procurement query analyzer. Your task is to analyze a user's query and provide a structured JSON output. Think step-by-step to deconstruct the query before you respond.
 
 <query>
 {query}
@@ -105,65 +105,46 @@ UNIFIED_ANALYSIS_PROMPT = """You are an expert procurement query analyzer. Your 
 <example>
   <query>Compare spending on Dell vs IBM last year, and recommend which to invest in.</query>
   <output>
-    <analysis>
-        <intent>comparison</intent>
-        <confidence>0.95</confidence>
-        <entities>
-            <vendors>
-                <vendor>Dell</vendor>
-                <vendor>IBM</vendor>
-            </vendors>
-            <metrics>
-                <metric>spending</metric>
-                <metric>invest</metric>
-            </metrics>
-            <time_periods>
-                <time_period>last year</time_period>
-            </time_periods>
-            <commodities/>
-        </entities>
-        <complexity>complex</complexity>
-        <suggested_approach>hybrid</suggested_approach>
-        <requires_decomposition>true</requires_decomposition>
-        <sub_queries>
-            <sub_query>What was the total spending on Dell last year?</sub_query>
-            <sub_query>What was the total spending on IBM last year?</sub_query>
-            <sub_query>Recommend which vendor to invest in based on spending.</sub_query>
-        </sub_queries>
-    </analysis>
+    {{
+      "intent": "comparison",
+      "complexity": "complex",
+      "requires_decomposition": true,
+      "sub_queries": [
+        "What was the total spending on Dell last year?",
+        "What was the total spending on IBM last year?",
+        "Recommend which vendor to invest in based on spending."
+      ],
+      "entities": {{
+        "vendors": ["Dell", "IBM"],
+        "metrics": ["spending", "invest"],
+        "time_periods": ["last year"],
+        "commodities": []
+      }},
+      "suggested_approach": "hybrid"
+    }}
   </output>
 </example>
 
-Carefully analyze the user's query and return ONLY the XML document with the required structure.
+Carefully analyze the user's query and return ONLY the JSON object with the required structure.
 
 <output_structure>
-<analysis>
-    <intent>(comparison|aggregation|ranking|lookup|statistical|trend|recommendation|exploration|other)</intent>
-    <confidence>(0.0-1.0)</confidence>
-    <entities>
-        <vendors>
-            <vendor>(vendor name)</vendor>
-        </vendors>
-        <metrics>
-            <metric>(metric name)</metric>
-        </metrics>
-        <time_periods>
-            <time_period>(time reference)</time_period>
-        </time_periods>
-        <commodities>
-            <commodity>(commodity name)</commodity>
-        </commodities>
-    </entities>
-    <complexity>(simple|complex)</complexity>
-    <suggested_approach>(sql|semantic|hybrid)</suggested_approach>
-    <requires_decomposition>(true|false)</requires_decomposition>
-    <sub_queries>
-        <sub_query>(sub-query text)</sub_query>
-    </sub_queries>
-</analysis>
+{{
+  "intent": "comparison|aggregation|ranking|lookup|statistical|trend|recommendation|exploration|other",
+  "confidence": 0.0-1.0,
+  "entities": {{
+    "vendors": ["list of vendor names mentioned"],
+    "metrics": ["spending", "count", "average", etc."],
+    "time_periods": ["any time references"],
+    "commodities": ["product/service categories"]
+  }},
+  "complexity": "simple|complex",
+  "suggested_approach": "sql|semantic|hybrid",
+  "requires_decomposition": true|false,
+  "sub_queries": ["list of sub-queries if complex, otherwise empty"]
+}}
 </output_structure>
 
-Final XML Output:"""
+Final JSON Output:"""
 
 # Standard Grounded Response Prompts (Non-Template)
 GROUNDED_SYNTHESIS_PROMPT = """You are a procurement data analyst. You MUST base your response ONLY on the provided data.
@@ -211,46 +192,28 @@ GROUNDED_RECOMMENDATION_PROMPT = """You are a strategic procurement advisor. You
 {focus}
 </focus_area>
 
-Generate an XML document of strategic recommendations. Each recommendation MUST include a justification that references specific data points, numbers, and vendor names from the context.
+Generate a JSON array of strategic recommendations with the following structure. Each recommendation MUST include a justification that references specific data points, numbers, and vendor names from the context.
+[
+  {{
+    "recommendation": "Your strategic advice here.",
+    "justification": "Explain exactly which data points from the context support this recommendation. Reference specific numbers and vendor names."
+  }}
+]
 
-<output_structure>
-<recommendations>
-    <recommendation>
-        <action>Your strategic advice here.</action>
-        <justification>Explain exactly which data points from the context support this recommendation. Reference specific numbers and vendor names.</justification>
-        <priority>HIGH|MEDIUM|LOW</priority>
-    </recommendation>
-</recommendations>
-</output_structure>
-
-If the data is insufficient, return an empty <recommendations/> tag. Do not add any text or explanation outside of the XML document.
+If the data is insufficient to make a recommendation, return an empty array []. Do not add any text or explanation outside of the JSON array.
 
 Strategic Recommendations:"""
 
-GROUNDED_STATISTICAL_PROMPT = """Provide a statistical analysis using ONLY the calculated metrics provided in the <statistics> tag.
-
-<statistics>
-{statistics}
-</statistics>
+GROUNDED_STATISTICAL_PROMPT = """Provide a statistical analysis using ONLY the calculated metrics provided.
 
 RULES:
-1. Your response must be a well-formed XML document.
-2. Explain what the statistics mean in business terms.
+1. Report the exact calculated values from the Statistical Results.
+2. Explain what the statistics mean in business terms, based only on the numbers given.
 3. Identify any notable patterns or outliers visible in the numbers.
+4. Do not extrapolate or predict beyond the provided calculations.
 
-<output_structure>
-<statistical_analysis>
-    <summary>Brief summary of the statistical findings.</summary>
-    <findings>
-        <finding>First key statistical insight with specific numbers.</finding>
-        <finding>Second key statistical insight.</finding>
-    </findings>
-    <business_impact>What these statistics mean for the business.</business_impact>
-    <recommendations>
-        <recommendation>Action to take based on these statistics.</recommendation>
-    </recommendations>
-</statistical_analysis>
-</output_structure>
+Statistical Results:
+{statistics}
 
 Remember: Your interpretation must be based exclusively on the provided Statistical Results.
 

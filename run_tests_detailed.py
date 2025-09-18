@@ -101,12 +101,12 @@ if __name__ == "__main__":
         {"name": "Health Check", "method": "GET", "endpoint": "/health"},
         {"name": "Top 5 Vendors", "method": "GET", "endpoint": "/top-vendors?n=5"},
         {"name": "Statistical Mean", "method": "POST", "endpoint": "/statistics/mean", "payload": {}},
-        {"name": "Specific Vendor Details", "method": "GET", "endpoint": "/vendor/Dell Inc"},
+        {"name": "Specific Vendor Details", "method": "GET", "endpoint": "/vendor/DELL COMPUTER CORP"},
     ]
     medium_queries = [
         {"name": "Basic Chat Query", "method": "POST", "endpoint": "/chat", "payload": {"message": "What is our total spending?", "session_id": "test-123"}},
         {"name": "Ambiguous Vendor Query", "method": "POST", "endpoint": "/ask", "payload": {"question": "How many orders did we place with the big blue computer company?"}},
-        {"name": "Direct Vendor Comparison", "method": "POST", "endpoint": "/compare", "payload": {"vendors": ["DELL", "IBM"]}},
+        {"name": "Direct Vendor Comparison", "method": "POST", "endpoint": "/compare-advanced", "payload": {"entities": ["DELL", "IBM"], "type": "vendors"}},
         {"name": "Dashboard Summary", "method": "GET", "endpoint": "/dashboard"},
     ]
     complex_queries = [

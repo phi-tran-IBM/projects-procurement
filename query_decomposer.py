@@ -9,7 +9,6 @@ import os
 import re
 import json
 import logging
-import xml.etree.ElementTree as ET
 from typing import Dict, Any, List, Tuple, Optional
 from dataclasses import asdict
 from functools import lru_cache
@@ -152,28 +151,13 @@ class MockChatWatsonx:
         # Return a structured response based on keywords in the prompt
         if "UNIFIED_ANALYSIS_PROMPT" in prompt or "expert procurement query analyzer" in prompt:
             # This is for the decompose_query function
-            mock_xml_output = """
-            <analysis>
-                <intent>comparison</intent>
-                <confidence>0.95</confidence>
-                <entities>
-                    <vendors>
-                        <vendor>Dell</vendor>
-                        <vendor>IBM</vendor>
-                    </vendors>
-                    <metrics>
-                        <metric>spending</metric>
-                    </metrics>
-                    <time_periods/>
-                    <commodities/>
-                </entities>
-                <complexity>simple</complexity>
-                <suggested_approach>hybrid</suggested_approach>
-                <requires_decomposition>false</requires_decomposition>
-                <sub_queries/>
-            </analysis>
-            """
-            return AIMessage(content=mock_xml_output)
+            mock_analysis = {
+                "intent": "comparison", "confidence": 0.95,
+                "entities": {"vendors": ["Dell", "IBM"], "metrics": ["spending"], "time_periods": [], "commodities": []},
+                "complexity": "simple", "suggested_approach": "hybrid",
+                "requires_decomposition": False, "sub_queries": [], "ambiguous_references": {}
+            }
+            return AIMessage(content=json.dumps(mock_analysis))
         elif "GROUNDED_STATISTICAL_PROMPT" in prompt or "statistical analysis" in prompt:
             # This is for interpret_statistics
             return AIMessage(content="<STATISTICAL_ANALYSIS><SUMMARY>The mock analysis shows stable spending.</SUMMARY><FINDING1>Mock Finding: The median is close to the mean.</FINDING1></STATISTICAL_ANALYSIS>")
@@ -306,34 +290,6 @@ class LLMQueryDecomposer:
     # UNIFIED ANALYSIS METHOD
     # ============================================
     
-    def _xml_to_dict(self, xml_string: str) -> Dict[str, Any]:
-        """Converts the LLM's XML output to a dictionary."""
-        try:
-            # Clean the input string to remove potential artifacts before the root element
-            xml_string = xml_string[xml_string.find('<analysis>'):]
-            root = ET.fromstring(xml_string)
-
-            analysis_dict = {
-                "intent": root.findtext("intent"),
-                "confidence": float(root.findtext("confidence", "0.0")),
-                "complexity": root.findtext("complexity"),
-                "suggested_approach": root.findtext("suggested_approach"),
-                "requires_decomposition": root.findtext("requires_decomposition") == "true",
-                "entities": {
-                    "vendors": [v.text for v in root.findall("entities/vendors/vendor")],
-                    "metrics": [m.text for m in root.findall("entities/metrics/metric")],
-                    "time_periods": [tp.text for tp in root.findall("entities/time_periods/time_period")],
-                    "commodities": [c.text for c in root.findall("entities/commodities/commodity")],
-                },
-                "sub_queries": [sq.text for sq in root.findall("sub_queries/sub_query")],
-                "ambiguous_references": {} # XML does not currently support this
-            }
-            return analysis_dict
-        except (ET.ParseError, ValueError) as e:
-            logger.error(f"Failed to parse XML response: {e}")
-            logger.error(f"Problematic XML string: {xml_string[:500]}")
-            return None
-
     def analyze_query_unified(self, query: str) -> UnifiedQueryAnalysis:
         """
         Perform unified analysis in a single LLM call.
@@ -364,29 +320,27 @@ class LLMQueryDecomposer:
             llm_response = self.decomposer_llm.invoke(prompt)
             self.total_llm_calls += 1
             
-            # Parse the XML response
-            analysis_dict = self._xml_to_dict(llm_response.content)
+            # Parse the JSON response
+            try:
+                # Extract JSON from response
+                response_text = llm_response.content
 
-            # If parsing fails, ask the LLM to fix the XML
-            if not analysis_dict:
-                logger.warning("Initial XML parsing failed. Attempting to fix with LLM...")
-                fix_prompt = f"""The following XML is malformed. Please fix it so it conforms to the schema.
-<malformed_xml>
-{llm_response.content}
-</malformed_xml>
+                # Try to find JSON in the response
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group()
+                    analysis_dict = json.loads(json_str)
+                else:
+                    # Try parsing entire response as JSON
+                    analysis_dict = json.loads(response_text)
 
-Return ONLY the corrected, well-formed XML.
-"""
-                fixed_response = self.decomposer_llm.invoke(fix_prompt)
-                self.total_llm_calls += 1
-                analysis_dict = self._xml_to_dict(fixed_response.content)
-
-            if not analysis_dict:
-                logger.error("XML parsing failed even after attempting to fix. Falling back.")
-                return self._fallback_unified_analysis(query)
+                # Create UnifiedQueryAnalysis from dict
+                analysis = UnifiedQueryAnalysis(**analysis_dict)
                 
-            # Create UnifiedQueryAnalysis from dict
-            analysis = UnifiedQueryAnalysis(**analysis_dict)
+            except (json.JSONDecodeError, Exception) as e:
+                logger.warning(f"Failed to parse unified response, using fixing parser: {e}")
+                # Try to fix with output parser
+                analysis = self.fixing_parser.parse(llm_response.content)
             
             # Post-process to resolve vendor aliases
             if analysis.entities.get('vendors'):
@@ -1083,7 +1037,7 @@ if __name__ == "__main__":
     print(f"Template Parsing: {FEATURES.get('template_parsing')}")
     print(f"Unified Analysis: {FEATURES.get('unified_analysis')}\n")
     
-    for query in test_queries[:3]:  # Test first 3 queries
+    for query in test_queries[:2]:  # Test first 2 queries
         print(f"\nQuery: {query}")
         print("-" * 40)
         
