@@ -232,13 +232,23 @@ class EnhancedRAGProcessor:
     
     def __init__(self):
         """Initialize the enhanced RAG processor"""
-        # Per user feedback, check for credentials before initializing
-        if not (WATSONX_PROJECT_ID or os.getenv("WX_AI_PROJECTID")) or not (WATSONX_API_KEY or os.getenv("WX_AI_APIKEY")):
-            logger.warning("WatsonX credentials not found. Using MockChatWatsonx for RAG processor.")
+        # Per user request, use an explicit flag to control mocking
+        if os.getenv('MOCK_SERVICES') == 'true':
+            logger.warning("MOCK_SERVICES is true. Using MockChatWatsonx for RAG processor.")
             self.llm = MockChatWatsonx()
-            self.memory = None # Mock memory is not needed for this scope
+            self.memory = None
             self.decomposer = get_decomposer() if DECOMPOSER_AVAILABLE else None
             self.vendor_resolver = get_vendor_resolver() if VENDOR_RESOLVER_AVAILABLE and FEATURES.get('central_vendor_resolver', False) else None
+            self.search_cache = None
+            return
+
+        # Check for credentials if not mocking
+        if not (WATSONX_PROJECT_ID or os.getenv("WX_AI_PROJECTID")) or not (WATSONX_API_KEY or os.getenv("WX_AI_APIKEY")):
+            logger.warning("WatsonX credentials not found and MOCK_SERVICES is not true. RAG processor LLM features will be disabled.")
+            self.llm = None
+            self.memory = None
+            self.decomposer = None
+            self.vendor_resolver = None
             self.search_cache = None
             return
 

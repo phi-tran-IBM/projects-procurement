@@ -927,8 +927,15 @@ def check_data_sufficiency(data: Any, requirement_type: str) -> Tuple[bool, str]
         actual = 0
     
     if actual < required:
+        # Map requirement type to the correct message key
+        message_key_map = {
+            'comparison': 'insufficient_vendors',
+            'statistical': 'insufficient_samples'
+        }
+        message_key = message_key_map.get(requirement_type, 'no_data')
+
         message = INSUFFICIENT_DATA_MESSAGES.get(
-            f'insufficient_{requirement_type}',
+            message_key,
             INSUFFICIENT_DATA_MESSAGES['no_data']
         )
         if '{required}' in message and '{found}' in message:

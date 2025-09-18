@@ -227,15 +227,14 @@ class VendorResolver:
         else:
             self.cache = None
         
+        # Compile regex patterns for vendor variations
+        self.variation_patterns = [re.compile(pattern, re.IGNORECASE)
+                                for pattern in VENDOR_NAME_VARIATIONS]
+
         # Build vendor lookup tables
         self._build_vendor_tables()
         
-        # Compile regex patterns for vendor variations
-
-        
         logger.info(f"VendorResolver initialized (cache: {self.cache_enabled})")
-        self.variation_patterns = [re.compile(pattern, re.IGNORECASE) 
-                                for pattern in VENDOR_NAME_VARIATIONS]
         
     def _build_vendor_tables(self):
         """Build lookup tables for efficient vendor resolution"""

@@ -32,13 +32,21 @@ class MockElasticsearch:
 
 class DiscoveryStore:
     def __init__(self):
+        # Per user request, use an explicit flag to control mocking
+        if os.getenv('MOCK_SERVICES') == 'true':
+            logger.warning("MOCK_SERVICES is true. Using MockElasticsearch.")
+            self.es = MockElasticsearch()
+            self.model = None
+            self.index = 'procurement'
+            return
+
         es_url = os.getenv('DISCOVERY_URL')
 
         if not es_url:
-            logger.warning("DISCOVERY_URL not set. Using MockElasticsearch for testing purposes.")
-            self.es = MockElasticsearch()
-            self.model = None  # No model needed for mock
-            self.index = 'procurement'
+            logger.warning("DISCOVERY_URL not set and MOCK_SERVICES is not true. Semantic search will be disabled.")
+            self.es = None
+            self.model = None
+            self.index = None
             return
 
         username = os.getenv('DISCOVERY_USERNAME', 'admin')

@@ -176,13 +176,12 @@ class LLMQueryDecomposer:
     
     def __init__(self):
         """Initialize the decomposer with specialized LLMs and caching"""
-        # Per user feedback, check for credentials before initializing
-        if not (WATSONX_PROJECT_ID or os.getenv("WX_AI_PROJECTID")) or not (WATSONX_API_KEY or os.getenv("WX_AI_APIKEY")):
-            logger.warning("WatsonX credentials not found. Using MockChatWatsonx for testing.")
-            self.llm_available = True  # We have a mock, so features can be "available"
+        # Per user request, use an explicit flag to control mocking
+        if os.getenv('MOCK_SERVICES') == 'true':
+            logger.warning("MOCK_SERVICES is true. Using MockChatWatsonx for Query Decomposer.")
+            self.llm_available = True
             self.decomposer_llm = MockChatWatsonx()
             self.synthesis_llm = MockChatWatsonx()
-            # We don't initialize the rest (parsers, etc.) for the mock case as they depend on a real LLM
             self.intent_parser = None
             self.entity_parser = None
             self.decomposition_parser = None
@@ -192,6 +191,14 @@ class LLMQueryDecomposer:
             self.entity_cache = None
             self.last_analysis_time = 0
             self.total_llm_calls = 0
+            return
+
+        # Check for credentials if not mocking
+        if not (WATSONX_PROJECT_ID or os.getenv("WX_AI_PROJECTID")) or not (WATSONX_API_KEY or os.getenv("WX_AI_APIKEY")):
+            logger.warning("WatsonX credentials not found and MOCK_SERVICES is not true. LLM features will be disabled.")
+            self.llm_available = False
+            self.decomposer_llm = None
+            self.synthesis_llm = None
             return
 
         try:
