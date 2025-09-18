@@ -10,7 +10,7 @@ import json
 from typing import Dict, Any, List, Optional, Tuple
 
 from constants import (
-    VENDOR_COL, COST_COL, DESC_COL, COMMODITY_COL,
+    VENDOR_COL, COST_COL, DESC_COL, COMMODITY_COL, DATE_COL,
     # Import new dynamic prompt functions
     get_grounded_synthesis_prompt, get_grounded_recommendation_prompt,
     get_grounded_comparison_prompt, get_grounded_statistical_prompt,
@@ -37,7 +37,7 @@ except ImportError:
 # Import core AI functions
 try:
     from hybrid_rag_logic import answer_question_intelligent
-    from query_decomposer import generate_response
+    from query_decomposer import generate_response, get_llm_chain
     LLM_AVAILABLE = True
 except ImportError:
     LLM_AVAILABLE = False
@@ -46,6 +46,9 @@ except ImportError:
 # ============================================
 # ENHANCED RESPONSE HANDLING FOR TEMPLATES
 # ============================================
+
+# Import template extraction utilities
+from template_utils import extract_from_template_response
 
 def extract_text_from_response(response: Any) -> str:
     """
@@ -72,162 +75,6 @@ def extract_text_from_response(response: Any) -> str:
         return str(response)
     else:
         return str(response)
-
-def extract_from_template_response(response_text: str) -> str:
-    """
-    Extract readable content from template-formatted responses.
-    Handles various template formats used by the system.
-    """
-    if not response_text or not isinstance(response_text, str):
-        return response_text
-    
-    # Check for recommendation template
-    if '<RECOMMENDATIONS_START>' in response_text or '<REC1>' in response_text:
-        return extract_recommendation_template(response_text)
-    
-    # Check for comparison template
-    if '<COMPARISON_START>' in response_text or '<VENDOR1>' in response_text:
-        return extract_comparison_template(response_text)
-    
-    # Check for statistical template
-    if '<STATISTICAL_ANALYSIS>' in response_text or '<FINDING1>' in response_text:
-        return extract_statistical_template(response_text)
-    
-    # Check for synthesis/general template
-    if '<RESPONSE_START>' in response_text or '<ANSWER>' in response_text:
-        return extract_synthesis_template(response_text)
-    
-    # Check for insufficient data
-    if '<INSUFFICIENT_DATA>' in response_text:
-        match = re.search(r'<INSUFFICIENT_DATA>(.*?)</INSUFFICIENT_DATA>', 
-                         response_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            return match.group(1).strip()
-    
-    # If no specific template found, try to clean generic tags
-    cleaned = clean_template_tags(response_text)
-    return cleaned if cleaned != response_text else response_text
-
-def extract_recommendation_template(response_text: str) -> str:
-    """Extract and format recommendation template responses"""
-    # Check for insufficient data first
-    insufficient_match = re.search(r'<INSUFFICIENT_DATA>(.*?)</INSUFFICIENT_DATA>', 
-                                 response_text, re.IGNORECASE | re.DOTALL)
-    if insufficient_match:
-        return insufficient_match.group(1).strip()
-    
-    # Extract recommendations
-    formatted = []
-    
-    # Try numbered recommendations
-    for i in range(1, 11):  # Support up to 10 recommendations
-        rec_pattern = f'<REC{i}>\\s*<ACTION>(.*?)</ACTION>\\s*<JUSTIFICATION>(.*?)</JUSTIFICATION>\\s*(?:<PRIORITY>(.*?)</PRIORITY>)?\\s*</REC{i}>'
-        match = re.search(rec_pattern, response_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            action = match.group(1).strip()
-            justification = match.group(2).strip()
-            priority = match.group(3).strip() if match.group(3) else "Medium"
-            formatted.append(f"{i}. {action} (Priority: {priority})\n   Justification: {justification}")
-    
-    if formatted:
-        return "Strategic Recommendations:\n\n" + "\n\n".join(formatted)
-    
-    # Fallback to simple extraction
-    return clean_template_tags(response_text)
-
-def extract_comparison_template(response_text: str) -> str:
-    """Extract and format comparison template responses"""
-    result = []
-    
-    # Extract summary
-    summary_match = re.search(r'<SUMMARY>(.*?)</SUMMARY>', response_text, re.IGNORECASE | re.DOTALL)
-    if summary_match:
-        result.append(f"Summary: {summary_match.group(1).strip()}\n")
-    
-    # Extract vendor analyses
-    for i in range(1, 11):  # Support up to 10 vendors
-        vendor_pattern = f'<VENDOR{i}>\\s*<NAME>(.*?)</NAME>\\s*<PERFORMANCE>(.*?)</PERFORMANCE>\\s*(?:<STRENGTHS>(.*?)</STRENGTHS>)?\\s*(?:<CONCERNS>(.*?)</CONCERNS>)?\\s*</VENDOR{i}>'
-        match = re.search(vendor_pattern, response_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            name = match.group(1).strip()
-            performance = match.group(2).strip()
-            strengths = match.group(3).strip() if match.group(3) else "Not specified"
-            concerns = match.group(4).strip() if match.group(4) else "None identified"
-            
-            result.append(f"**{name}**")
-            result.append(f"Performance: {performance}")
-            result.append(f"Strengths: {strengths}")
-            result.append(f"Concerns: {concerns}\n")
-    
-    # Extract recommendation
-    rec_match = re.search(r'<RECOMMENDATION>(.*?)</RECOMMENDATION>', response_text, re.IGNORECASE | re.DOTALL)
-    if rec_match:
-        result.append(f"Recommendation: {rec_match.group(1).strip()}")
-    
-    if result:
-        return "\n".join(result)
-    
-    return clean_template_tags(response_text)
-
-def extract_statistical_template(response_text: str) -> str:
-    """Extract and format statistical template responses"""
-    result = []
-    
-    # Extract summary
-    summary_match = re.search(r'<SUMMARY>(.*?)</SUMMARY>', response_text, re.IGNORECASE | re.DOTALL)
-    if summary_match:
-        result.append(f"Summary: {summary_match.group(1).strip()}\n")
-    
-    # Extract findings
-    findings = []
-    for i in range(1, 11):  # Support up to 10 findings
-        finding_pattern = f'<FINDING{i}>(.*?)</FINDING{i}>'
-        match = re.search(finding_pattern, response_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            findings.append(f"{i}. {match.group(1).strip()}")
-    
-    if findings:
-        result.append("Key Findings:")
-        result.extend(findings)
-        result.append("")
-    
-    # Extract business impact
-    impact_match = re.search(r'<BUSINESS_IMPACT>(.*?)</BUSINESS_IMPACT>', response_text, re.IGNORECASE | re.DOTALL)
-    if impact_match:
-        result.append(f"Business Impact: {impact_match.group(1).strip()}\n")
-    
-    # Extract recommendations
-    rec_match = re.search(r'<RECOMMENDATIONS>(.*?)</RECOMMENDATIONS>', response_text, re.IGNORECASE | re.DOTALL)
-    if rec_match:
-        result.append(f"Recommendations: {rec_match.group(1).strip()}")
-    
-    if result:
-        return "\n".join(result)
-    
-    return clean_template_tags(response_text)
-
-def extract_synthesis_template(response_text: str) -> str:
-    """Extract and format synthesis/general template responses"""
-    # Try to extract main answer
-    answer_match = re.search(r'<ANSWER>(.*?)</ANSWER>', response_text, re.IGNORECASE | re.DOTALL)
-    if answer_match:
-        return answer_match.group(1).strip()
-    
-    # Try to extract response content
-    response_match = re.search(r'<RESPONSE>(.*?)</RESPONSE>', response_text, re.IGNORECASE | re.DOTALL)
-    if response_match:
-        return response_match.group(1).strip()
-    
-    # Fallback to cleaning tags
-    return clean_template_tags(response_text)
-
-def clean_template_tags(text: str) -> str:
-    """Remove all template tags from text"""
-    # Remove all XML-like tags
-    cleaned = re.sub(r'<[^>]+>', '', text)
-    # Clean up extra whitespace
-    cleaned = re.sub(r'\s+', ' ', cleaned)
-    return cleaned.strip()
 
 def format_llm_response_as_list(response: Any) -> List[str]:
     """
@@ -727,21 +574,44 @@ def interpret_statistics(result: Dict, metric: str) -> str:
     """Interpret statistical results using grounded approach with template support."""
     if "error" in result:
         return result["error"]
-    
-    if LLM_AVAILABLE and FEATURES.get('grounded_prompts', False):
-        # Use dynamic prompt function
-        prompt = get_grounded_statistical_prompt().format(
-            statistics=json.dumps(result),
-            question=f"Interpret these {metric} statistics in business terms."
-        )
-        
-        response = generate_response("statistical interpretation", result)
-        return extract_text_from_response(response)
-    else:
+
+    def get_simple_interpretation():
+        """Provides a basic, non-LLM interpretation."""
         if "value" in result:
-            return f"The {metric} is ${result['value']:,.2f} based on {result['records_analyzed']} records"
+            return f"The {metric} is ${result['value']:,.2f} based on {result['records_analyzed']} records."
         else:
-            return f"Statistical analysis complete with {result['records_analyzed']} records"
+            # Handle 'all' case
+            mean = result.get('mean', 0)
+            median = result.get('median', 0)
+            return (f"Statistical analysis complete for {result['records_analyzed']} records. "
+                    f"Mean: ${mean:,.2f}, Median: ${median:,.2f}.")
+
+    if LLM_AVAILABLE and FEATURES.get('grounded_prompts', False):
+        prompt_template_str = get_grounded_statistical_prompt()
+        llm_question = f"Interpret these {metric} statistics in business terms. Provide a summary, key findings, and business impact."
+
+        try:
+            llm_chain = get_llm_chain(prompt_template_str)
+
+            response = llm_chain.run({
+                "statistics": json.dumps(result, indent=2, default=str),
+                "question": llm_question
+            })
+
+            extracted_response = extract_text_from_response(response)
+
+            # Per user feedback, avoid silent fallbacks. If LLM gives a bad response, log it and use the simple one.
+            if not extracted_response or "insufficient data" in extracted_response.lower():
+                 logger.warning(f"LLM returned a low-quality interpretation. Raw response: {response}")
+                 return get_simple_interpretation()
+
+            return extracted_response
+
+        except Exception as e:
+            logger.error(f"LLM-based statistical interpretation failed: {e}")
+            return get_simple_interpretation()
+    else:
+        return get_simple_interpretation()
 
 # ============================================
 # DASHBOARD & REPORT FUNCTIONS WITH TEMPLATE SUPPORT
@@ -971,9 +841,46 @@ def generate_report_conclusions(report: Dict) -> str:
     return "Analysis complete for: " + ", ".join(conclusions)
 
 def generate_report_recommendations(report: Dict) -> str:
-    """Generate report recommendations."""
-    recs = generate_dashboard_recommendations()
-    return "\n".join(recs)
+    """
+    Generate strategic recommendations based on the content of the report.
+    This function calls the more powerful get_strategic_recommendations for each
+    section in the report to generate context-specific advice.
+    """
+    all_recs = []
+
+    # Mapping from report section area to a strategic context
+    context_mapping = {
+        'spending': 'cost optimization',
+        'vendors': 'vendor management and consolidation',
+        'efficiency': 'procurement process improvement',
+        'executive_summary': 'overall procurement strategy',
+        'conclusions': 'strategic planning'
+    }
+
+    report_sections = report.get('sections', {})
+    if not report_sections:
+        return "No report sections available to generate recommendations."
+
+    for area in report_sections.keys():
+        context = context_mapping.get(area.lower())
+        if context:
+            logger.info(f"Generating report recommendations for area: {area} with context: {context}")
+            # Get strategic recommendations for this context
+            strategic_rec_dict = get_strategic_recommendations(context)
+
+            # Extract the text answer
+            rec_text = extract_text_from_response(strategic_rec_dict)
+
+            if rec_text and "error" not in rec_text.lower() and "insufficient data" not in rec_text.lower():
+                # Add a title for each section's recommendations
+                all_recs.append(f"--- Recommendations for {area.replace('_', ' ').title()} ---")
+                all_recs.append(rec_text)
+                all_recs.append("") # Add a blank line for spacing
+
+    if not all_recs:
+        return "Could not generate specific recommendations based on the report data."
+
+    return "\n".join(all_recs)
 
 def generate_report_visualizations(report: Dict) -> List[Dict]:
     """Generate visualization configurations."""
@@ -984,11 +891,50 @@ def generate_report_visualizations(report: Dict) -> List[Dict]:
     ]
 
 def get_trend_data() -> Dict:
-    """Get trend data (placeholder as no date column available)."""
-    return {
-        "message": "Trend analysis requires date information",
-        "available": False
-    }
+    """
+    Get trend data for spending over time.
+    This function queries the database to get monthly spending totals.
+    """
+    query = f"""
+    SELECT
+        strftime('%Y-%m', {DATE_COL}) as month,
+        SUM(CAST({COST_COL} AS FLOAT)) as total_spending
+    FROM procurement
+    WHERE {DATE_COL} IS NOT NULL AND {COST_COL} IS NOT NULL
+    GROUP BY month
+    ORDER BY month ASC
+    """
+
+    try:
+        df = safe_execute_query(query)
+
+        if df.empty:
+            return {
+                "available": False,
+                "message": "Insufficient data to generate trend analysis."
+            }
+
+        # Format for chart
+        labels = df['month'].tolist()
+        data = df['total_spending'].tolist()
+
+        return {
+            "available": True,
+            "labels": labels,
+            "datasets": [
+                {
+                    "label": "Total Spending per Month",
+                    "data": data
+                }
+            ]
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get trend data: {e}")
+        return {
+            "available": False,
+            "message": f"An error occurred while generating trend data: {e}"
+        }
 
 def generate_alerts() -> List[Dict]:
     """Generate system alerts based on thresholds."""
@@ -1118,3 +1064,87 @@ def combine_analysis_results(results: Dict) -> str:
             combined.append(f"{key}: {value['answer'][:100]}...")
     
     return "\n".join(combined) if combined else "Analysis complete"
+
+def get_strategic_recommendations(context: str = "cost optimization") -> Dict[str, Any]:
+    """
+    Get strategic recommendations based on data from the SQL database.
+    This is the primary implementation for recommendations, bypassing semantic search.
+    """
+    logger.info(f"Generating recommendations for context: {context}")
+
+    try:
+        top_spenders_query = f"""
+        SELECT "{VENDOR_COL}" as vendor, SUM(CAST("{COST_COL}" AS FLOAT)) as total_spending, COUNT(*) as order_count
+        FROM procurement
+        WHERE "{COST_COL}" IS NOT NULL
+        GROUP BY "{VENDOR_COL}"
+        ORDER BY total_spending DESC
+        LIMIT 10
+        """
+        top_spenders_df = safe_execute_query(top_spenders_query)
+
+        consolidation_candidates_query = f"""
+        SELECT "{VENDOR_COL}" as vendor, COUNT(*) as order_count, AVG(CAST("{COST_COL}" AS FLOAT)) as avg_order
+        FROM procurement
+        WHERE "{COST_COL}" IS NOT NULL
+        GROUP BY "{VENDOR_COL}"
+        HAVING order_count > 10 AND avg_order < 500
+        ORDER BY order_count DESC
+        LIMIT 10
+        """
+        consolidation_df = safe_execute_query(consolidation_candidates_query)
+
+    except Exception as e:
+        logger.error(f"Failed to query data for recommendations: {e}")
+        return {"error": "Database query for recommendations failed.", "answer": "Could not retrieve data to generate recommendations."}
+
+    data_context = {
+        "focus_area": context,
+        "top_10_vendors_by_spending": top_spenders_df.to_dict('records'),
+        "potential_consolidation_candidates": consolidation_df.to_dict('records')
+    }
+
+    if top_spenders_df.empty and consolidation_df.empty:
+        return {
+            "answer": "I was unable to find sufficient data to generate recommendations for your specified context.",
+            "records_analyzed": 0,
+            "source": "SQL"
+        }
+
+    if not LLM_AVAILABLE:
+        logger.warning("LLM not available, returning basic recommendations.")
+        # Basic non-LLM recommendations
+        recs = []
+        if not consolidation_df.empty:
+            recs.append(f"Consider consolidating up to {len(consolidation_df)} vendors with many small orders.")
+        if not top_spenders_df.empty:
+            recs.append(f"Review spending with top vendors like {top_spenders_df.iloc[0]['vendor']} for potential savings.")
+        return {"answer": "\n".join(recs) if recs else "No specific recommendations generated."}
+
+    try:
+        prompt = get_grounded_recommendation_prompt().format(
+            context=json.dumps(data_context, indent=2),
+            focus=context,
+            question=f"Generate recommendations for {context} based on the provided data."
+        )
+
+        llm_chain = get_llm_chain(prompt)
+        llm_response = llm_chain.run({})
+        response_text = extract_text_from_response(llm_response)
+
+        if not response_text or "insufficient" in response_text.lower():
+            response_text = "Based on the available data, no specific recommendations could be generated by the LLM."
+
+        return {
+            "answer": response_text,
+            "summary": response_text,
+            "records_analyzed": len(top_spenders_df) + len(consolidation_df),
+            "confidence": 85,
+            "source": "SQL-Grounded RAG",
+            "recommendation_type": context,
+            "grounded_recommendation": True,
+            "template_parsing": FEATURES.get('template_parsing', False)
+        }
+    except Exception as e:
+        logger.error(f"LLM call for recommendations failed: {e}")
+        return {"error": "Failed to generate recommendations from the language model."}
