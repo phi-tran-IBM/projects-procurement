@@ -17,18 +17,18 @@ class TestDownstreamLogic(unittest.TestCase):
     def test_extract_recommendation_template(self):
         print("\nTesting: test_extract_recommendation_template")
         mock_llm_response = """
-        <RECOMMENDATIONS_START>
-        <REC1>
-        <ACTION>Consolidate vendors for office supplies.</ACTION>
-        <JUSTIFICATION>High number of vendors with low spending per vendor.</JUSTIFICATION>
-        <PRIORITY>HIGH</PRIORITY>
-        </REC1>
-        <REC2>
-        <ACTION>Negotiate bulk discount with DELL INC.</ACTION>
-        <JUSTIFICATION>High total spending ($1500.00) across 2 orders.</JUSTIFICATION>
-        <PRIORITY>MEDIUM</PRIORITY>
-        </REC2>
-        </RECOMMENDATIONS_START>
+        <recommendations>
+            <recommendation>
+                <action>Consolidate vendors for office supplies.</action>
+                <justification>High number of vendors with low spending per vendor.</justification>
+                <priority>HIGH</priority>
+            </recommendation>
+            <recommendation>
+                <action>Negotiate bulk discount with DELL INC.</action>
+                <justification>High total spending ($1500.00) across 2 orders.</justification>
+                <priority>MEDIUM</priority>
+            </recommendation>
+        </recommendations>
         """
         expected_output = "Strategic Recommendations:\n\n1. Consolidate vendors for office supplies. (Priority: HIGH)\n   Justification: High number of vendors with low spending per vendor.\n\n2. Negotiate bulk discount with DELL INC. (Priority: MEDIUM)\n   Justification: High total spending ($1500.00) across 2 orders."
         actual_output = extract_recommendation_template(mock_llm_response)
@@ -67,15 +67,19 @@ class TestDownstreamLogic(unittest.TestCase):
     def test_extract_statistical_template(self):
         print("\nTesting: test_extract_statistical_template")
         mock_llm_response = """
-        <STATISTICAL_ANALYSIS>
-        <SUMMARY>The overall spending shows a stable trend with a few high-value outliers.</SUMMARY>
-        <FINDING1>The median order value is $195.00, which is significantly lower than the mean of $3044.01.</FINDING1>
-        <FINDING2>The standard deviation is high, indicating large variance in order values.</FINDING2>
-        <BUSINESS_IMPACT>The discrepancy between median and mean suggests that a few large purchases are skewing the average.</BUSINESS_IMPACT>
-        <RECOMMENDATIONS>Investigate the high-value orders to understand the key drivers of cost.</RECOMMENDATIONS>
-        </STATISTICAL_ANALYSIS>
+        <statistical_analysis>
+            <summary>The overall spending shows a stable trend with a few high-value outliers.</summary>
+            <findings>
+                <finding>The median order value is $195.00, which is significantly lower than the mean of $3044.01.</finding>
+                <finding>The standard deviation is high, indicating large variance in order values.</finding>
+            </findings>
+            <business_impact>The discrepancy between median and mean suggests that a few large purchases are skewing the average.</business_impact>
+            <recommendations>
+                <recommendation>Investigate the high-value orders to understand the key drivers of cost.</recommendation>
+            </recommendations>
+        </statistical_analysis>
         """
-        expected_output = "Summary: The overall spending shows a stable trend with a few high-value outliers.\n\nKey Findings:\n1. The median order value is $195.00, which is significantly lower than the mean of $3044.01.\n2. The standard deviation is high, indicating large variance in order values.\n\nBusiness Impact: The discrepancy between median and mean suggests that a few large purchases are skewing the average.\n\nRecommendations: Investigate the high-value orders to understand the key drivers of cost."
+        expected_output = "Summary: The overall spending shows a stable trend with a few high-value outliers.\n\nKey Findings:\n1. The median order value is $195.00, which is significantly lower than the mean of $3044.01.\n2. The standard deviation is high, indicating large variance in order values.\n\nBusiness Impact: The discrepancy between median and mean suggests that a few large purchases are skewing the average.\n\nRecommendations:\n- Investigate the high-value orders to understand the key drivers of cost."
         actual_output = extract_statistical_template(mock_llm_response)
         print(f"Expected:\n{expected_output}")
         print(f"Actual:\n{actual_output}")

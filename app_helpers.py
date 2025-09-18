@@ -7,6 +7,7 @@ import numpy as np
 import logging
 import re
 import json
+import xml.etree.ElementTree as ET
 from typing import Dict, Any, List, Optional, Tuple
 
 from constants import (
@@ -47,189 +48,7 @@ except ImportError:
 # ENHANCED RESPONSE HANDLING FOR TEMPLATES
 # ============================================
 
-def extract_text_from_response(response: Any) -> str:
-    """
-    Enhanced extraction for both template and JSON responses.
-    Handles dict, string, template formats, and other types safely.
-    """
-    if response is None:
-        return ""
-    
-    if isinstance(response, str):
-        # Check if it's a template response
-        if FEATURES.get('template_parsing', False):
-            extracted = extract_from_template_response(response)
-            if extracted and extracted != response:
-                return extracted
-        return response
-    elif isinstance(response, dict):
-        # Try common fields that might contain the text response
-        for field in ['answer', 'text', 'content', 'response', 'result']:
-            if field in response and response[field]:
-                # Recursively extract in case the field contains template
-                return extract_text_from_response(response[field])
-        # Fallback to string representation
-        return str(response)
-    else:
-        return str(response)
-
-def extract_from_template_response(response_text: str) -> str:
-    """
-    Extract readable content from template-formatted responses.
-    Handles various template formats used by the system.
-    """
-    if not response_text or not isinstance(response_text, str):
-        return response_text
-    
-    # Check for recommendation template
-    if '<RECOMMENDATIONS_START>' in response_text or '<REC1>' in response_text:
-        return extract_recommendation_template(response_text)
-    
-    # Check for comparison template
-    if '<COMPARISON_START>' in response_text or '<VENDOR1>' in response_text:
-        return extract_comparison_template(response_text)
-    
-    # Check for statistical template
-    if '<STATISTICAL_ANALYSIS>' in response_text or '<FINDING1>' in response_text:
-        return extract_statistical_template(response_text)
-    
-    # Check for synthesis/general template
-    if '<RESPONSE_START>' in response_text or '<ANSWER>' in response_text:
-        return extract_synthesis_template(response_text)
-    
-    # Check for insufficient data
-    if '<INSUFFICIENT_DATA>' in response_text:
-        match = re.search(r'<INSUFFICIENT_DATA>(.*?)</INSUFFICIENT_DATA>', 
-                         response_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            return match.group(1).strip()
-    
-    # If no specific template found, try to clean generic tags
-    cleaned = clean_template_tags(response_text)
-    return cleaned if cleaned != response_text else response_text
-
-def extract_recommendation_template(response_text: str) -> str:
-    """Extract and format recommendation template responses"""
-    # Check for insufficient data first
-    insufficient_match = re.search(r'<INSUFFICIENT_DATA>(.*?)</INSUFFICIENT_DATA>', 
-                                 response_text, re.IGNORECASE | re.DOTALL)
-    if insufficient_match:
-        return insufficient_match.group(1).strip()
-    
-    # Extract recommendations
-    formatted = []
-    
-    # Try numbered recommendations
-    for i in range(1, 11):  # Support up to 10 recommendations
-        rec_pattern = f'<REC{i}>\\s*<ACTION>(.*?)</ACTION>\\s*<JUSTIFICATION>(.*?)</JUSTIFICATION>\\s*(?:<PRIORITY>(.*?)</PRIORITY>)?\\s*</REC{i}>'
-        match = re.search(rec_pattern, response_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            action = match.group(1).strip()
-            justification = match.group(2).strip()
-            priority = match.group(3).strip() if match.group(3) else "Medium"
-            formatted.append(f"{i}. {action} (Priority: {priority})\n   Justification: {justification}")
-    
-    if formatted:
-        return "Strategic Recommendations:\n\n" + "\n\n".join(formatted)
-    
-    # Fallback to simple extraction
-    return clean_template_tags(response_text)
-
-def extract_comparison_template(response_text: str) -> str:
-    """Extract and format comparison template responses"""
-    result = []
-    
-    # Extract summary
-    summary_match = re.search(r'<SUMMARY>(.*?)</SUMMARY>', response_text, re.IGNORECASE | re.DOTALL)
-    if summary_match:
-        result.append(f"Summary: {summary_match.group(1).strip()}\n")
-    
-    # Extract vendor analyses
-    for i in range(1, 11):  # Support up to 10 vendors
-        vendor_pattern = f'<VENDOR{i}>\\s*<NAME>(.*?)</NAME>\\s*<PERFORMANCE>(.*?)</PERFORMANCE>\\s*(?:<STRENGTHS>(.*?)</STRENGTHS>)?\\s*(?:<CONCERNS>(.*?)</CONCERNS>)?\\s*</VENDOR{i}>'
-        match = re.search(vendor_pattern, response_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            name = match.group(1).strip()
-            performance = match.group(2).strip()
-            strengths = match.group(3).strip() if match.group(3) else "Not specified"
-            concerns = match.group(4).strip() if match.group(4) else "None identified"
-            
-            result.append(f"**{name}**")
-            result.append(f"Performance: {performance}")
-            result.append(f"Strengths: {strengths}")
-            result.append(f"Concerns: {concerns}\n")
-    
-    # Extract recommendation
-    rec_match = re.search(r'<RECOMMENDATION>(.*?)</RECOMMENDATION>', response_text, re.IGNORECASE | re.DOTALL)
-    if rec_match:
-        result.append(f"Recommendation: {rec_match.group(1).strip()}")
-    
-    if result:
-        return "\n".join(result)
-    
-    return clean_template_tags(response_text)
-
-def extract_statistical_template(response_text: str) -> str:
-    """Extract and format statistical template responses"""
-    result = []
-    
-    # Extract summary
-    summary_match = re.search(r'<SUMMARY>(.*?)</SUMMARY>', response_text, re.IGNORECASE | re.DOTALL)
-    if summary_match:
-        result.append(f"Summary: {summary_match.group(1).strip()}\n")
-    
-    # Extract findings
-    findings = []
-    for i in range(1, 11):  # Support up to 10 findings
-        finding_pattern = f'<FINDING{i}>(.*?)</FINDING{i}>'
-        match = re.search(finding_pattern, response_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            findings.append(f"{i}. {match.group(1).strip()}")
-    
-    if findings:
-        result.append("Key Findings:")
-        result.extend(findings)
-        result.append("")
-    
-    # Extract business impact
-    impact_match = re.search(r'<BUSINESS_IMPACT>(.*?)</BUSINESS_IMPACT>', response_text, re.IGNORECASE | re.DOTALL)
-    if impact_match:
-        result.append(f"Business Impact: {impact_match.group(1).strip()}\n")
-    
-    # Extract recommendations
-    rec_match = re.search(r'<RECOMMENDATIONS>(.*?)</RECOMMENDATIONS>', response_text, re.IGNORECASE | re.DOTALL)
-    if rec_match:
-        result.append(f"Recommendations: {rec_match.group(1).strip()}")
-    
-    if result:
-        return "\n".join(result)
-    
-    return clean_template_tags(response_text)
-
-def extract_synthesis_template(response_text: str) -> str:
-    """Extract and format synthesis/general template responses"""
-    # Try to extract main answer
-    answer_match = re.search(r'<ANSWER>(.*?)</ANSWER>', response_text, re.IGNORECASE | re.DOTALL)
-    if answer_match:
-        return answer_match.group(1).strip()
-    
-    # Try to extract response content
-    response_match = re.search(r'<RESPONSE>(.*?)</RESPONSE>', response_text, re.IGNORECASE | re.DOTALL)
-    if response_match:
-        return response_match.group(1).strip()
-    
-    # Fallback to cleaning tags
-    return clean_template_tags(response_text)
-
-def clean_template_tags(text: str) -> str:
-    """Remove all template tags from text"""
-    # Remove all XML-like tags
-    cleaned = re.sub(r'<[^>]+>', '', text)
-    # Clean up extra whitespace
-    cleaned = re.sub(r'\s+', ' ', cleaned)
-    return cleaned.strip()
-
-def format_llm_response_as_list(response: Any) -> List[str]:
+from template_utils import format_llm_response_as_list, extract_text_from_response
     """
     Format LLM response as a list of strings.
     Enhanced to handle template responses.
@@ -293,6 +112,7 @@ def get_vendor_comprehensive_data(vendor_name: str) -> Optional[Dict]:
     Get comprehensive vendor data with VendorResolver integration.
     """
     resolved_vendors = resolve_vendor_list(vendor_name, max_results=10)
+    print(f"DEBUG: For input '{vendor_name}', resolved to: {resolved_vendors}")
     
     if not resolved_vendors:
         logger.warning(f"No vendors found matching '{vendor_name}'")
